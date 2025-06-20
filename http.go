@@ -2,7 +2,7 @@
  * @Author: FunctionSir
  * @License: AGPLv3
  * @Date: 2025-06-20 08:41:27
- * @LastEditTime: 2025-06-20 11:26:31
+ * @LastEditTime: 2025-06-20 16:23:17
  * @LastEditors: FunctionSir
  * @Description: -
  * @FilePath: /biblio-matrix/http.go
@@ -10,8 +10,13 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
+	"math"
 	"net/http"
+	"strconv"
+	"time"
 )
 
 func apiOnlyHomeHandler(w http.ResponseWriter, r *http.Request) {
@@ -22,14 +27,29 @@ func apiOnlyHomeHandler(w http.ResponseWriter, r *http.Request) {
 func authHandler(w http.ResponseWriter, r *http.Request) {
 	username := r.PostFormValue("username")
 	passwd := r.PostFormValue("passwd")
-	if username == "" || passwd == "" || !Auth(username, passwd) {
-		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+	role := r.PostFormValue("role")
+	if role == "" || (role != "admin" && role != "reader") {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
-	token, exp := NewToken(ChkIsAdmin(username))
+	var token string
+	var exp time.Time
+	if role == "admin" {
+		if username == "" || passwd == "" || !AuthAdmin(username, passwd) {
+			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+			return
+		}
+		token, exp = NewToken(username, true)
+	} else {
+		if username == "" || passwd == "" || !AuthReader(username, passwd) {
+			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+			return
+		}
+		token, exp = NewToken(username, false)
+	}
 	http.SetCookie(w, &http.Cookie{Name: "token", Value: token, SameSite: http.SameSiteDefaultMode, Expires: exp})
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(http.StatusText(http.StatusAccepted)))
+	w.Write([]byte(http.StatusText(http.StatusOK)))
 }
 
 func deauthHandler(w http.ResponseWriter, r *http.Request) {
@@ -41,15 +61,168 @@ func deauthHandler(w http.ResponseWriter, r *http.Request) {
 	DelToken(tokenCookie.Value)
 }
 
+func borrowHandler(w http.ResponseWriter, r *http.Request) {
+	tokenCookie, err := r.Cookie("token")
+	if err != nil || tokenCookie.Valid() != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	book := r.PostFormValue("book")
+	duration := r.PostFormValue("duration")
+	if book == "" || duration == "" {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	durationInt, err := strconv.Atoi(duration)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result := Borrow(ctx, GetTokenUsername(tokenCookie.Value), book, time.Now(), time.Now().Add(time.Duration(durationInt*24)*time.Hour))
+	if ctx.Err() != nil {
+		http.Error(w, "操作超时. 请联系管理员.", http.StatusConflict)
+		return
+	}
+	if result != "" {
+		http.Error(w, result, http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("🎉 恭喜! 借书成功!"))
+}
+
+func returnHandler(w http.ResponseWriter, r *http.Request) {
+	tokenCookie, err := r.Cookie("token")
+	if err != nil || tokenCookie.Valid() != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	book := r.PostFormValue("book")
+	if book == "" {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result := Return(ctx, GetTokenUsername(tokenCookie.Value), book)
+	if ctx.Err() != nil {
+		http.Error(w, "操作超时. 请联系管理员.", http.StatusConflict)
+		return
+	}
+	if result != "" {
+		http.Error(w, result, http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("🎉 恭喜! 还书成功!"))
+}
+
+func listHandler(w http.ResponseWriter, r *http.Request) {
+	books := List()
+	if books == nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	s := fmt.Sprintf("书籍总数: %d\n", len(books))
+	for _, b := range books {
+		s += fmt.Sprintf("书号: %s, 书名: %s, 作者: %s, 价格: %.2f, 库存量: %d\n", b.Id, b.Name, b.Author, float64(b.Price)/100.0, b.Count)
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(s))
+}
+
+func addHandler(w http.ResponseWriter, r *http.Request) {
+	tokenCookie, err := r.Cookie("token")
+	if err != nil || tokenCookie.Valid() != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	book := r.PostFormValue("book")
+	if book == "" {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	exists, err := IsBookExists(book)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	count := r.PostFormValue("count")
+	if count == "" {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	cnt, err := strconv.Atoi(count)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	if exists {
+		AddCnt(book, cnt)
+		return
+	}
+	name := r.PostFormValue("name")
+	author := r.PostFormValue("author")
+	priceStr := r.PostFormValue("price")
+	priceFloat64, err := strconv.ParseFloat(priceStr, 64)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	priceInt := int(math.Round(priceFloat64 * 100))
+	countStr := r.PostFormValue("count")
+	countInt, err := strconv.Atoi(countStr)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	err = AddBook(Book{Id: book, Name: name, Author: author, Price: priceInt, Count: countInt})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(http.StatusText(http.StatusOK)))
+}
+
+func newHandler(w http.ResponseWriter, r *http.Request) {
+	tokenCookie, err := r.Cookie("token")
+	if err != nil || tokenCookie.Valid() != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	username := r.PostFormValue("username")
+	passwd := r.PostFormValue("passwd")
+	name := r.PostFormValue("name")
+	if username == "" || passwd == "" {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	err = AddReader(username, passwd, name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(http.StatusText(http.StatusOK)))
+}
+
 func serveHttp(addr string) {
 	if FrontendDir == "" {
 		log.Println("No frontend specified, started as an API-ONLY server.")
-		http.HandleFunc("/", Chain(apiOnlyHomeHandler, Logging))
+		http.HandleFunc("/", apiOnlyHomeHandler)
 	} else {
 		http.Handle("/", http.FileServer(http.Dir(FrontendDir)))
 	}
 	http.HandleFunc("/auth", Chain(authHandler, Logging))
-	http.HandleFunc("/deauth", Chain(deauthHandler, SimpleAuth, Logging))
+	http.HandleFunc("/deauth", Chain(deauthHandler, ReaderLvlAuth, Logging))
+	http.HandleFunc("/borrow", Chain(borrowHandler, ReaderLvlAuth, Logging))
+	http.HandleFunc("/return", Chain(returnHandler, ReaderLvlAuth, Logging))
+	http.HandleFunc("/list", Chain(listHandler, Logging))
+	http.HandleFunc("/add", Chain(addHandler, AdminLvlAuth, Logging))
+	http.HandleFunc("/new", Chain(newHandler, AdminLvlAuth, Logging))
 	err := http.ListenAndServe(addr, nil)
 	panic(err)
 }

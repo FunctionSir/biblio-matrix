@@ -6,4 +6,5 @@ require (
 	github.com/FunctionSir/goset v0.1.1
 	github.com/FunctionSir/readini v0.3.1
 	github.com/google/uuid v1.6.0
+	golang.org/x/crypto v0.39.0
 )

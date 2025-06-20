@@ -21,6 +21,7 @@ func Logging(next http.HandlerFunc) http.HandlerFunc {
 
 var TokensSet goset.Set[string]
 var TokensExp map[string]time.Time
+var TokensUser map[string]string
 var TokensIsAdmin map[string]bool
 var TokenLock sync.Mutex
 
@@ -35,6 +36,7 @@ func ChkToken(token string) bool {
 	if TokensExp[token].UnixNano() <= time.Now().UnixNano() {
 		TokensSet.Erase(token)
 		delete(TokensExp, token)
+		delete(TokensUser, token)
 		delete(TokensIsAdmin, token)
 		return false
 	}
@@ -50,7 +52,16 @@ func ChkTokensIsAdmin(token string) bool {
 	return TokensIsAdmin[token]
 }
 
-func NewToken(isAdmin bool) (string, time.Time) {
+func GetTokenUsername(token string) string {
+	TokenLock.Lock()
+	defer TokenLock.Unlock()
+	if !TokensSet.Has(token) {
+		return ""
+	}
+	return TokensUser[token]
+}
+
+func NewToken(username string, isAdmin bool) (string, time.Time) {
 	TokenLock.Lock()
 	defer TokenLock.Unlock()
 	token := uuid.NewString()
@@ -60,6 +71,7 @@ func NewToken(isAdmin bool) (string, time.Time) {
 	exp := time.Now().Add(24 * time.Hour)
 	TokensSet.Insert(token)
 	TokensExp[token] = exp
+	TokensUser[token] = username
 	TokensIsAdmin[token] = isAdmin
 	return token, exp
 }
@@ -72,10 +84,11 @@ func DelToken(token string) {
 	}
 	TokensSet.Erase(token)
 	delete(TokensExp, token)
+	delete(TokensUser, token)
 	delete(TokensIsAdmin, token)
 }
 
-func SimpleAuth(next http.HandlerFunc) http.HandlerFunc {
+func ReaderLvlAuth(next http.HandlerFunc) http.HandlerFunc {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		tokenCookie, err := r.Cookie("token")
 		if err != nil || tokenCookie.Valid() != nil {
@@ -92,7 +105,7 @@ func SimpleAuth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // Do not need to use with SimpleAuth, just use it ONLY when needed.
-func AdminAuth(next http.HandlerFunc) http.HandlerFunc {
+func AdminLvlAuth(next http.HandlerFunc) http.HandlerFunc {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		tokenCookie, err := r.Cookie("token")
 		if err != nil || tokenCookie.Valid() != nil {
