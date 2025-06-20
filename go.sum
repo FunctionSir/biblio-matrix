@@ -1,0 +1,6 @@
+github.com/FunctionSir/goset v0.1.1 h1:e8UZvk5/aHeZG1tCu9QU1yLKzmHkxkD+mzsFlCtujn4=
+github.com/FunctionSir/goset v0.1.1/go.mod h1:3EkwnQqY34NbRdZhxvQCcSj51IGkhjx1/6Yb9pqhDYI=
+github.com/FunctionSir/readini v0.3.1 h1:5GtZyPxq303idGqxTkU7GZhMC1ZCmh81T4B1Zxr3BrE=
+github.com/FunctionSir/readini v0.3.1/go.mod h1:2gKP2NEX3eA8mwrq8xBDDDsyGGAeLhBKaWA9OsUY/P0=
+github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
+github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
