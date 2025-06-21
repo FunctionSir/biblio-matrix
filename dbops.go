@@ -2,7 +2,7 @@
  * @Author: FunctionSir
  * @License: AGPLv3
  * @Date: 2025-06-20 09:50:27
- * @LastEditTime: 2025-06-20 16:28:57
+ * @LastEditTime: 2025-06-21 09:53:02
  * @LastEditors: FunctionSir
  * @Description: -
  * @FilePath: /biblio-matrix/dbops.go
@@ -17,15 +17,23 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/microsoft/go-mssqldb"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type Book struct {
-	Id     string
-	Name   string
-	Author string
-	Price  int
-	Count  int
+	Id     string `json:"id"`
+	Name   string `json:"name"`
+	Author string `json:"author"`
+	Price  int    `json:"price"`
+	Count  int    `json:"count"`
+}
+
+type Record struct {
+	Username   string    `json:"username"` // Who borrowed the book
+	Id         string    `json:"id"`       // Which book was borrowed
+	BorrowedAt time.Time `json:"borrowed"` // Borrowed time
+	ReturnAt   time.Time `json:"return"`   // Must return before or at this time
 }
 
 func DbOpen(conn string) *sql.DB {
@@ -147,7 +155,7 @@ func Return(ctx context.Context, username string, bookId string) string {
 	return ""
 }
 
-func List() []Book {
+func ListBooks() []Book {
 	books := make([]Book, 0)
 	db := DbOpen(DbConn)
 	stmt := DbPrepare(db, "SELECT ID,NAME,AUTHOR,PRICE,CNT FROM READERS FROM BOOKS")
@@ -197,11 +205,46 @@ func AddBook(b Book) error {
 func AddReader(username, passwd, name string) error {
 	db := DbOpen(DbConn)
 	stmt := DbPrepare(db, "INSERT INTO READERS VALUES (?,?,?,?)")
-	tmp, err := bcrypt.GenerateFromPassword([]byte(passwd), bcrypt.DefaultCost)
+	tmp, err := bcrypt.GenerateFromPassword([]byte(passwd), BCryptCost)
 	if err != nil {
 		return err
 	}
 	passwd = string(tmp)
 	_, err = stmt.Exec(username, passwd, name, 0)
 	return err
+}
+
+func AddAdmin(username, passwd, name string) error {
+	db := DbOpen(DbConn)
+	stmt := DbPrepare(db, "INSERT INTO ADMINS VALUES (?,?,?)")
+	tmp, err := bcrypt.GenerateFromPassword([]byte(passwd), BCryptCost)
+	if err != nil {
+		return err
+	}
+	passwd = string(tmp)
+	_, err = stmt.Exec(username, passwd, name)
+	return err
+}
+
+func ListRecords(username string) []Record {
+	result := make([]Record, 0)
+	db := DbOpen(DbConn)
+	var rows *sql.Rows
+	var err error
+	if username != "*" {
+		stmt := DbPrepare(db, "SELECT * FROM RECORDS WHERE USERNAME=? ORDERED BY RETURN")
+		rows, err = stmt.Query(username)
+	} else {
+		stmt := DbPrepare(db, "SELECT * FROM RECORDS ORDERED BY RETURN")
+		rows, err = stmt.Query()
+	}
+	if err != nil {
+		return nil
+	}
+	var tmp Record
+	for rows.Next() {
+		rows.Scan(&tmp.Username, &tmp.Id, &tmp.BorrowedAt, &tmp.ReturnAt)
+		result = append(result, tmp)
+	}
+	return result
 }

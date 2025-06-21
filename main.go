@@ -2,7 +2,7 @@
  * @Author: FunctionSir
  * @License: AGPLv3
  * @Date: 2025-06-20 08:28:04
- * @LastEditTime: 2025-06-20 10:06:35
+ * @LastEditTime: 2025-06-21 08:40:54
  * @LastEditors: FunctionSir
  * @Description: -
  * @FilePath: /biblio-matrix/main.go
@@ -10,10 +10,15 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
+	"log"
 	"os"
+	"strconv"
 
 	"github.com/FunctionSir/readini"
+	_ "github.com/microsoft/go-mssqldb"
+	"golang.org/x/crypto/bcrypt"
 )
 
 const VER string = "0.1.0"
@@ -21,6 +26,7 @@ const VER string = "0.1.0"
 var DbConn string
 var HttpAddr string
 var FrontendDir string
+var BCryptCost int
 
 func getConf() {
 	if len(os.Args) < 2 {
@@ -41,6 +47,15 @@ func getConf() {
 	} else {
 		FrontendDir = confFile["options"]["Frontend"]
 	}
+	if !confFile.HasKey("options", "BCryptCost") {
+		BCryptCost = bcrypt.DefaultCost
+	} else {
+		tmp := confFile["options"]["BCryptCost"]
+		BCryptCost, err = strconv.Atoi(tmp)
+		if err != nil || BCryptCost < bcrypt.MinCost || BCryptCost > bcrypt.MaxCost {
+			panic("bcrypt cost found but illegal")
+		}
+	}
 	DbConn = confFile["options"]["DB"]
 	HttpAddr = confFile["options"]["Addr"]
 }
@@ -49,5 +64,15 @@ func main() {
 	fmt.Println("Biblio Matrix Library Management System Server")
 	fmt.Printf("Version: %s | This is a FOSS under AGPLv3\n", VER)
 	getConf()
+	log.Println("Testing DB connection...")
+	db, err := sql.Open("mssql", DbConn)
+	if err != nil {
+		panic(err)
+	}
+	err = db.Ping()
+	if err != nil {
+		panic(err)
+	}
+	log.Println("MSSQL DB connection OK.")
 	serveHttp(HttpAddr)
 }

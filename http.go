@@ -2,7 +2,7 @@
  * @Author: FunctionSir
  * @License: AGPLv3
  * @Date: 2025-06-20 08:41:27
- * @LastEditTime: 2025-06-20 16:23:17
+ * @LastEditTime: 2025-06-21 09:52:25
  * @LastEditors: FunctionSir
  * @Description: -
  * @FilePath: /biblio-matrix/http.go
@@ -11,7 +11,7 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"log"
 	"math"
 	"net/http"
@@ -119,18 +119,30 @@ func returnHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("🎉 恭喜! 还书成功!"))
 }
 
-func listHandler(w http.ResponseWriter, r *http.Request) {
-	books := List()
+func listBooksHandler(w http.ResponseWriter, r *http.Request) {
+	books := ListBooks()
 	if books == nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	s := fmt.Sprintf("书籍总数: %d\n", len(books))
-	for _, b := range books {
-		s += fmt.Sprintf("书号: %s, 书名: %s, 作者: %s, 价格: %.2f, 库存量: %d\n", b.Id, b.Name, b.Author, float64(b.Price)/100.0, b.Count)
-	}
+	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(s))
+	json.NewEncoder(w).Encode(books)
+}
+
+func listRecordsHandler(w http.ResponseWriter, r *http.Request) {
+	username := r.PostFormValue("username")
+	if username == "" {
+		username = "*"
+	}
+	records := ListRecords(username)
+	if records == nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(records)
 }
 
 func addHandler(w http.ResponseWriter, r *http.Request) {
@@ -187,7 +199,7 @@ func addHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(http.StatusText(http.StatusOK)))
 }
 
-func newHandler(w http.ResponseWriter, r *http.Request) {
+func newReaderHandler(w http.ResponseWriter, r *http.Request) {
 	tokenCookie, err := r.Cookie("token")
 	if err != nil || tokenCookie.Valid() != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -209,6 +221,28 @@ func newHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(http.StatusText(http.StatusOK)))
 }
 
+func newAdminHandler(w http.ResponseWriter, r *http.Request) {
+	tokenCookie, err := r.Cookie("token")
+	if err != nil || tokenCookie.Valid() != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	username := r.PostFormValue("username")
+	passwd := r.PostFormValue("passwd")
+	name := r.PostFormValue("name")
+	if username == "" || passwd == "" {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	err = AddAdmin(username, passwd, name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(http.StatusText(http.StatusOK)))
+}
+
 func serveHttp(addr string) {
 	if FrontendDir == "" {
 		log.Println("No frontend specified, started as an API-ONLY server.")
@@ -220,9 +254,11 @@ func serveHttp(addr string) {
 	http.HandleFunc("/deauth", Chain(deauthHandler, ReaderLvlAuth, Logging))
 	http.HandleFunc("/borrow", Chain(borrowHandler, ReaderLvlAuth, Logging))
 	http.HandleFunc("/return", Chain(returnHandler, ReaderLvlAuth, Logging))
-	http.HandleFunc("/list", Chain(listHandler, Logging))
+	http.HandleFunc("/list/books", Chain(listBooksHandler, Logging))
+	http.HandleFunc("/list/records", Chain(listRecordsHandler, Logging))
 	http.HandleFunc("/add", Chain(addHandler, AdminLvlAuth, Logging))
-	http.HandleFunc("/new", Chain(newHandler, AdminLvlAuth, Logging))
+	http.HandleFunc("/new/reader", Chain(newReaderHandler, AdminLvlAuth, Logging))
+	http.HandleFunc("/new/admin", Chain(newAdminHandler, AdminLvlAuth, Logging))
 	err := http.ListenAndServe(addr, nil)
 	panic(err)
 }
