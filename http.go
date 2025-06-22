@@ -2,7 +2,7 @@
  * @Author: FunctionSir
  * @License: AGPLv3
  * @Date: 2025-06-20 08:41:27
- * @LastEditTime: 2025-06-21 09:52:25
+ * @LastEditTime: 2025-06-21 16:27:52
  * @LastEditors: FunctionSir
  * @Description: -
  * @FilePath: /biblio-matrix/http.go
@@ -48,17 +48,20 @@ func authHandler(w http.ResponseWriter, r *http.Request) {
 		token, exp = NewToken(username, false)
 	}
 	http.SetCookie(w, &http.Cookie{Name: "token", Value: token, SameSite: http.SameSiteDefaultMode, Expires: exp})
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(http.StatusText(http.StatusOK)))
+	json.NewEncoder(w).Encode(map[string]any{"status": "success", "admin": ChkTokensIsAdmin(token)})
 }
 
 func deauthHandler(w http.ResponseWriter, r *http.Request) {
-	tokenCookie, err := r.Cookie("TOKEN")
+	tokenCookie, err := r.Cookie("token")
 	if err != nil || tokenCookie.Valid() != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 	DelToken(tokenCookie.Value)
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(http.StatusText(http.StatusOK)))
 }
 
 func borrowHandler(w http.ResponseWriter, r *http.Request) {
@@ -69,18 +72,21 @@ func borrowHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	book := r.PostFormValue("book")
 	duration := r.PostFormValue("duration")
-	if book == "" || duration == "" {
+	if book == "" {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
+	}
+	if duration == "" {
+		duration = "30"
 	}
 	durationInt, err := strconv.Atoi(duration)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
-	result := Borrow(ctx, GetTokenUsername(tokenCookie.Value), book, time.Now(), time.Now().Add(time.Duration(durationInt*24)*time.Hour))
+	result := Borrow(ctx, GetTokenUsername(tokenCookie.Value), book, time.Now().UTC(), time.Now().UTC().Add(time.Duration(durationInt*24)*time.Hour))
 	if ctx.Err() != nil {
 		http.Error(w, "操作超时. 请联系管理员.", http.StatusConflict)
 		return
@@ -131,7 +137,16 @@ func listBooksHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func listRecordsHandler(w http.ResponseWriter, r *http.Request) {
+	tokenCookie, err := r.Cookie("token")
+	if err != nil || tokenCookie.Valid() != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
 	username := r.PostFormValue("username")
+	if !ChkTokensIsAdmin(tokenCookie.Value) && GetTokenUsername(tokenCookie.Value) != username {
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
+	}
 	if username == "" {
 		username = "*"
 	}
@@ -187,6 +202,10 @@ func addHandler(w http.ResponseWriter, r *http.Request) {
 	countStr := r.PostFormValue("count")
 	countInt, err := strconv.Atoi(countStr)
 	if err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	if name == "" || author == "" || priceInt < 0 || countInt <= 0 {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
@@ -255,7 +274,7 @@ func serveHttp(addr string) {
 	http.HandleFunc("/borrow", Chain(borrowHandler, ReaderLvlAuth, Logging))
 	http.HandleFunc("/return", Chain(returnHandler, ReaderLvlAuth, Logging))
 	http.HandleFunc("/list/books", Chain(listBooksHandler, Logging))
-	http.HandleFunc("/list/records", Chain(listRecordsHandler, Logging))
+	http.HandleFunc("/list/records", Chain(listRecordsHandler, ReaderLvlAuth, Logging))
 	http.HandleFunc("/add", Chain(addHandler, AdminLvlAuth, Logging))
 	http.HandleFunc("/new/reader", Chain(newReaderHandler, AdminLvlAuth, Logging))
 	http.HandleFunc("/new/admin", Chain(newAdminHandler, AdminLvlAuth, Logging))

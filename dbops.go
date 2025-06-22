@@ -2,7 +2,7 @@
  * @Author: FunctionSir
  * @License: AGPLv3
  * @Date: 2025-06-20 09:50:27
- * @LastEditTime: 2025-06-21 09:53:02
+ * @LastEditTime: 2025-06-21 16:26:38
  * @LastEditors: FunctionSir
  * @Description: -
  * @FilePath: /biblio-matrix/dbops.go
@@ -54,7 +54,7 @@ func DbPrepare(db *sql.DB, query string) *sql.Stmt {
 
 func AuthReader(username string, passwd string) bool {
 	db := DbOpen(DbConn)
-	stmt := DbPrepare(db, "SELECT PASSWD FROM ADMINS WHERE USERNAME=?")
+	stmt := DbPrepare(db, "SELECT PASSWD FROM READERS WHERE USERNAME=?")
 	row := stmt.QueryRow(username)
 	var hashedPasswd string
 	err := row.Scan(&hashedPasswd)
@@ -69,7 +69,7 @@ func AuthReader(username string, passwd string) bool {
 
 func AuthAdmin(username string, passwd string) bool {
 	db := DbOpen(DbConn)
-	stmt := DbPrepare(db, "SELECT PASSWD FROM READERS WHERE USERNAME=?")
+	stmt := DbPrepare(db, "SELECT PASSWD FROM ADMINS WHERE USERNAME=?")
 	row := stmt.QueryRow(username)
 	var hashedPasswd string
 	err := row.Scan(&hashedPasswd)
@@ -89,22 +89,22 @@ func Borrow(ctx context.Context, username string, bookId string, borrowedAt time
 		return "无法启动事务. 请联系管理员."
 	}
 	defer tx.Rollback() // If anything fail, rollback the transaction.
-	row := tx.QueryRowContext(ctx, "SELECT COUNT(*)>0 FROM RECORDS WHERE ID=? AND USERNAME=?", bookId, username)
-	var alreadyBorrowed bool
+	row := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM RECORDS WHERE ID=? AND USERNAME=?", bookId, username)
+	var alreadyBorrowed int
 	err = row.Scan(&alreadyBorrowed)
 	if err != nil {
 		return "无法完成查询. 请联系管理员."
 	}
-	if alreadyBorrowed {
+	if alreadyBorrowed > 0 {
 		return "您已经借过该书了."
 	}
-	row = tx.QueryRowContext(ctx, "SELECT COUNT(*)=1 FROM BOOKS WHERE ID=? AND CNT>=1", bookId)
-	var canBorrow bool
-	err = row.Scan(&canBorrow)
+	row = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM BOOKS WHERE ID=? AND CNT>=1", bookId)
+	var bookEntryCnt int
+	err = row.Scan(&bookEntryCnt)
 	if err != nil {
 		return "无法完成查询. 请联系管理员."
 	}
-	if !canBorrow {
+	if bookEntryCnt != 1 {
 		return "该书已无剩余库存, 或不存在, 或存在ID冲突."
 	}
 	_, err = tx.ExecContext(ctx, "UPDATE BOOKS SET CNT=CNT-1 WHERE ID=?", bookId)
@@ -112,6 +112,10 @@ func Borrow(ctx context.Context, username string, bookId string, borrowedAt time
 		return "无法完成借书, 请联系管理员."
 	}
 	_, err = tx.ExecContext(ctx, "UPDATE READERS SET CNT=CNT+1 WHERE USERNAME=?", username)
+	if err != nil {
+		return "无法完成借书, 请联系管理员."
+	}
+	_, err = tx.ExecContext(ctx, "INSERT INTO RECORDS VALUES (?,?,?,?)", username, bookId, borrowedAt, returnAt)
 	if err != nil {
 		return "无法完成借书, 请联系管理员."
 	}
@@ -128,13 +132,13 @@ func Return(ctx context.Context, username string, bookId string) string {
 		return "无法启动事务. 请联系管理员."
 	}
 	defer tx.Rollback() // If anything fail, rollback the transaction.
-	row := tx.QueryRowContext(ctx, "SELECT COUNT(*)>0 FROM RECORDS WHERE ID=? AND USERNAME=?", bookId, username)
-	var alreadyBorrowed bool
+	row := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM RECORDS WHERE ID=? AND USERNAME=?", bookId, username)
+	var alreadyBorrowed int
 	err = row.Scan(&alreadyBorrowed)
 	if err != nil {
 		return "无法完成查询. 请联系管理员."
 	}
-	if !alreadyBorrowed {
+	if alreadyBorrowed <= 0 {
 		return "您还没有借过过该书."
 	}
 	_, err = tx.ExecContext(ctx, "DELETE FROM RECORDS WHERE ID=? AND USERNAME=?", bookId, username)
@@ -158,7 +162,7 @@ func Return(ctx context.Context, username string, bookId string) string {
 func ListBooks() []Book {
 	books := make([]Book, 0)
 	db := DbOpen(DbConn)
-	stmt := DbPrepare(db, "SELECT ID,NAME,AUTHOR,PRICE,CNT FROM READERS FROM BOOKS")
+	stmt := DbPrepare(db, "SELECT ID,NAME,AUTHOR,PRICE,CNT FROM BOOKS")
 	rows, err := stmt.Query()
 	if err != nil {
 		return nil
@@ -173,14 +177,14 @@ func ListBooks() []Book {
 
 func IsBookExists(id string) (bool, error) {
 	db := DbOpen(DbConn)
-	stmt := DbPrepare(db, "SELECT COUNT(*)>0 FROM BOOKS WHERE ID=?")
+	stmt := DbPrepare(db, "SELECT COUNT(*) FROM BOOKS WHERE ID=?")
 	res := stmt.QueryRow(id)
-	var bookExists bool
-	err := res.Scan(&bookExists)
+	var booksEntriesExists int
+	err := res.Scan(&booksEntriesExists)
 	if err != nil {
 		return false, err
 	}
-	return bookExists, nil
+	return booksEntriesExists > 0, nil
 }
 
 func AddCnt(id string, count int) {
@@ -192,7 +196,7 @@ func AddCnt(id string, count int) {
 		return
 	}
 	stmt = DbPrepare(db, "UPDATE BOOKS SET CNT=CNT+? WHERE ID=?")
-	stmt.Exec(id, count)
+	stmt.Exec(count, id)
 }
 
 func AddBook(b Book) error {
@@ -232,10 +236,10 @@ func ListRecords(username string) []Record {
 	var rows *sql.Rows
 	var err error
 	if username != "*" {
-		stmt := DbPrepare(db, "SELECT * FROM RECORDS WHERE USERNAME=? ORDERED BY RETURN")
+		stmt := DbPrepare(db, "SELECT * FROM RECORDS WHERE USERNAME=? ORDER BY \"RETURN\"")
 		rows, err = stmt.Query(username)
 	} else {
-		stmt := DbPrepare(db, "SELECT * FROM RECORDS ORDERED BY RETURN")
+		stmt := DbPrepare(db, "SELECT * FROM RECORDS ORDER BY \"RETURN\"")
 		rows, err = stmt.Query()
 	}
 	if err != nil {
