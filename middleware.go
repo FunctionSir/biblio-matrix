@@ -12,7 +12,7 @@ import (
 
 func Logging(next http.HandlerFunc) http.HandlerFunc {
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now().UTC()
+		start := time.Now()
 		defer func() { log.Println(r.RemoteAddr, r.URL.Path, time.Since(start)) }()
 		next(w, r)
 	}
@@ -33,7 +33,7 @@ func ChkToken(token string) bool {
 	}
 	// Do NOT use DelToken here!
 	// Or a DEAD LOCK will occur!
-	if TokensExp[token].UnixNano() <= time.Now().UTC().UnixNano() {
+	if TokensExp[token].UnixNano() <= time.Now().UnixNano() {
 		TokensSet.Erase(token)
 		delete(TokensExp, token)
 		delete(TokensUser, token)
@@ -68,7 +68,7 @@ func NewToken(username string, isAdmin bool) (string, time.Time) {
 	for TokensSet.Has(token) {
 		token = uuid.NewString()
 	}
-	exp := time.Now().UTC().Add(24 * time.Hour)
+	exp := time.Now().Add(24 * time.Hour)
 	TokensSet.Insert(token)
 	TokensExp[token] = exp
 	TokensUser[token] = username

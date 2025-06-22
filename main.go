@@ -2,7 +2,7 @@
  * @Author: FunctionSir
  * @License: AGPLv3
  * @Date: 2025-06-20 08:28:04
- * @LastEditTime: 2025-06-21 11:50:35
+ * @LastEditTime: 2025-06-22 15:41:49
  * @LastEditors: FunctionSir
  * @Description: -
  * @FilePath: /biblio-matrix/main.go
@@ -63,10 +63,6 @@ func getConf() {
 }
 
 func main() {
-	// 	var TokensSet goset.Set[string]
-	// var TokensExp map[string]time.Time
-	// var TokensUser map[string]string
-	// var TokensIsAdmin map[string]bool
 	fmt.Println("Biblio Matrix Library Management System Server")
 	fmt.Printf("Version: %s | This is a FOSS under AGPLv3\n", VER)
 	getConf()
