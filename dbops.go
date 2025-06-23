@@ -2,7 +2,7 @@
  * @Author: FunctionSir
  * @License: AGPLv3
  * @Date: 2025-06-20 09:50:27
- * @LastEditTime: 2025-06-21 16:26:38
+ * @LastEditTime: 2025-06-23 09:53:29
  * @LastEditors: FunctionSir
  * @Description: -
  * @FilePath: /biblio-matrix/dbops.go
@@ -251,4 +251,92 @@ func ListRecords(username string) []Record {
 		result = append(result, tmp)
 	}
 	return result
+}
+
+func DelUser(username string) error {
+	db := DbOpen(DbConn)
+	stmt := DbPrepare(db, "EXEC REMOVE_USER ?")
+	_, err := stmt.Exec(username)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func DelBook(bookId string) error {
+	db := DbOpen(DbConn)
+	stmt := DbPrepare(db, "DELETE FROM BOOKS WHERE ID=?")
+	_, err := stmt.Exec(bookId)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+type OverdueReader struct {
+	Username string `json:"username"`
+	Name     string `json:"name"`
+}
+
+func ListOverdueReaders() ([]OverdueReader, error) {
+	db := DbOpen(DbConn)
+	stmt := DbPrepare(db, "SELECT * FROM READERS_OVERDUE")
+	rows, err := stmt.Query()
+	if err != nil {
+		return nil, err
+	}
+	res := make([]OverdueReader, 0)
+	var tmp OverdueReader
+	for rows.Next() {
+		rows.Scan(&tmp.Username, &tmp.Name)
+		res = append(res, tmp)
+	}
+	return res, nil
+}
+
+type Reader struct {
+	Username string `json:"username"`
+	Name     string `json:"name"`
+	Borrowed int    `json:"borrowed"`
+}
+
+func GetReaderInfo(username string) (Reader, error) {
+	db := DbOpen(DbConn)
+	stmt := DbPrepare(db, "SELECT USERNAME,\"NAME\",CNT FROM READERS WHERE USERNAME=?")
+	row := stmt.QueryRow(username)
+	var res Reader
+	err := row.Scan(&res.Username, &res.Name, &res.Borrowed)
+	if err != nil {
+		return Reader{}, err
+	}
+	return res, nil
+}
+
+type Admin struct {
+	Username string `json:"username"`
+	Name     string `json:"name"`
+}
+
+func GetAdminInfo(username string) (Admin, error) {
+	db := DbOpen(DbConn)
+	stmt := DbPrepare(db, "SELECT USERNAME,\"NAME\",CNT FROM ADMINS WHERE USERNAME=?")
+	row := stmt.QueryRow(username)
+	var res Admin
+	err := row.Scan(&res.Username, &res.Name)
+	if err != nil {
+		return Admin{}, err
+	}
+	return res, nil
+}
+
+func GetBookInfo(bookId string) (Book, error) {
+	db := DbOpen(DbConn)
+	stmt := DbPrepare(db, "SELECT * FROM BOOKS WHERE ID=?")
+	row := stmt.QueryRow(bookId)
+	var tmp Book
+	err := row.Scan(&tmp.Id, &tmp.Name, &tmp.Author, &tmp.Price, &tmp.Count)
+	if err != nil {
+		return Book{}, err
+	}
+	return tmp, nil
 }

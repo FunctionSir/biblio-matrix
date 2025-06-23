@@ -43,6 +43,17 @@ func ChkToken(token string) bool {
 	return true
 }
 
+func ClearTokens() {
+	TokenLock.Lock()
+	defer TokenLock.Unlock()
+	// Do NOT use DelToken here!
+	// Or a DEAD LOCK will occur!
+	clear(TokensSet)
+	clear(TokensExp)
+	clear(TokensUser)
+	clear(TokensIsAdmin)
+}
+
 func ChkTokensIsAdmin(token string) bool {
 	TokenLock.Lock()
 	defer TokenLock.Unlock()

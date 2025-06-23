@@ -2,7 +2,7 @@
  * @Author: FunctionSir
  * @License: AGPLv3
  * @Date: 2025-06-20 08:41:27
- * @LastEditTime: 2025-06-21 16:27:52
+ * @LastEditTime: 2025-06-23 10:13:17
  * @LastEditors: FunctionSir
  * @Description: -
  * @FilePath: /biblio-matrix/http.go
@@ -262,6 +262,108 @@ func newAdminHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(http.StatusText(http.StatusOK)))
 }
 
+func delUserHandler(w http.ResponseWriter, r *http.Request) {
+	username := r.PostFormValue("username")
+	if username == "" {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	err := DelUser(username)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(http.StatusText(http.StatusOK)))
+}
+
+func delBookHandler(w http.ResponseWriter, r *http.Request) {
+	book := r.PostFormValue("book")
+	if book == "" {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	err := DelBook(book)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(http.StatusText(http.StatusOK)))
+}
+
+func listOverdueReadersHandler(w http.ResponseWriter, r *http.Request) {
+	readers, err := ListOverdueReaders()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(readers)
+}
+
+func readerInfoHandler(w http.ResponseWriter, r *http.Request) {
+	tokenCookie, err := r.Cookie("token")
+	if err != nil || tokenCookie.Valid() != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	username := r.PostFormValue("username")
+	if username == "" {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	if !ChkTokensIsAdmin(tokenCookie.Value) && GetTokenUsername(tokenCookie.Value) != username {
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
+	}
+	reader, err := GetReaderInfo(username)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(reader)
+}
+
+func adminInfoHandler(w http.ResponseWriter, r *http.Request) {
+	username := r.PostFormValue("username")
+	if username == "" {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	admin, err := GetAdminInfo(username)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(admin)
+}
+
+func bookInfoHandler(w http.ResponseWriter, r *http.Request) {
+	bookId := r.PostFormValue("book")
+	if bookId == "" {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	book, err := GetBookInfo(bookId)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(book)
+}
+
+func clearTokens(w http.ResponseWriter, r *http.Request) {
+
+}
+
 func serveHttp(addr string) {
 	if FrontendDir == "" {
 		log.Println("No frontend specified, started as an API-ONLY server.")
@@ -275,9 +377,25 @@ func serveHttp(addr string) {
 	http.HandleFunc("/return", Chain(returnHandler, ReaderLvlAuth, Logging))
 	http.HandleFunc("/list/books", Chain(listBooksHandler, Logging))
 	http.HandleFunc("/list/records", Chain(listRecordsHandler, ReaderLvlAuth, Logging))
+	http.HandleFunc("/list/overdue", Chain(listOverdueReadersHandler, AdminLvlAuth, Logging))
 	http.HandleFunc("/add", Chain(addHandler, AdminLvlAuth, Logging))
 	http.HandleFunc("/new/reader", Chain(newReaderHandler, AdminLvlAuth, Logging))
 	http.HandleFunc("/new/admin", Chain(newAdminHandler, AdminLvlAuth, Logging))
-	err := http.ListenAndServe(addr, nil)
+	http.HandleFunc("/clear/tokens", Chain(clearTokens, AdminLvlAuth, Logging))
+	http.HandleFunc("/del/user", Chain(delUserHandler, AdminLvlAuth, Logging))
+	http.HandleFunc("/del/book", Chain(delBookHandler, AdminLvlAuth, Logging))
+	http.HandleFunc("/readerinfo", Chain(readerInfoHandler, ReaderLvlAuth, Logging))
+	http.HandleFunc("/admininfo", Chain(adminInfoHandler, AdminLvlAuth, Logging))
+	http.HandleFunc("/bookinfo", Chain(bookInfoHandler, Logging))
+	var err error
+	if TlsCert == "" || TlsKey == "" {
+		log.Printf("Listening HTTP on %s...\n", addr)
+		err = http.ListenAndServe(addr, nil)
+	} else {
+		log.Printf("Using cert file: %s\n", TlsCert)
+		log.Printf("Using key file: %s\n", TlsKey)
+		log.Printf("Listening HTTPS on %s...\n", addr)
+		err = http.ListenAndServeTLS(addr, TlsCert, TlsKey, nil)
+	}
 	panic(err)
 }

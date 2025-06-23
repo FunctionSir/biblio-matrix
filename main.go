@@ -2,7 +2,7 @@
  * @Author: FunctionSir
  * @License: AGPLv3
  * @Date: 2025-06-20 08:28:04
- * @LastEditTime: 2025-06-22 15:41:49
+ * @LastEditTime: 2025-06-23 10:15:58
  * @LastEditors: FunctionSir
  * @Description: -
  * @FilePath: /biblio-matrix/main.go
@@ -29,10 +29,29 @@ var DbConn string
 var HttpAddr string
 var FrontendDir string
 var BCryptCost int
+var TlsCert string
+var TlsKey string
 
 func getConf() {
 	if len(os.Args) < 2 {
-		panic("no config file specified")
+		panic("no config file or operation specified")
+	}
+	if os.Args[1] == "hash-passwd" {
+		fmt.Println("Please make sure that NO ONE ELSE can see your terminal!")
+		fmt.Printf("BCrypt cost (%d~%d): ", bcrypt.MinCost, bcrypt.MaxCost)
+		var bcCost int
+		fmt.Scanf("%d\n", &bcCost)
+		fmt.Println("Again! Please make sure that NO ONE ELSE can see your terminal!")
+		fmt.Print("Input password (will be echoed!): ")
+		var passwd string
+		fmt.Scanln(&passwd)
+		fmt.Print("Hashed password: ")
+		hashed, err := bcrypt.GenerateFromPassword([]byte(passwd), bcCost)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(string(hashed))
+		os.Exit(0)
 	}
 	confFile, err := readini.LoadFromFile(os.Args[1])
 	if err != nil {
@@ -57,6 +76,19 @@ func getConf() {
 		if err != nil || BCryptCost < bcrypt.MinCost || BCryptCost > bcrypt.MaxCost {
 			panic("bcrypt cost found but illegal")
 		}
+	}
+	if !confFile.HasKey("options", "Cert") {
+		TlsCert = ""
+	} else {
+		TlsCert = confFile["options"]["Cert"]
+	}
+	if !confFile.HasKey("options", "Key") {
+		TlsKey = ""
+	} else {
+		TlsKey = confFile["options"]["Key"]
+	}
+	if TlsCert == "" || TlsKey == "" {
+		log.Println("Warning: Incomplete TLS config, using HTTP instead of HTTPS!")
 	}
 	DbConn = confFile["options"]["DB"]
 	HttpAddr = confFile["options"]["Addr"]
